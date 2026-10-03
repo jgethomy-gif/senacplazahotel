@@ -1,8 +1,7 @@
-
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-
-const API_LOGIN = "http://localhost:3001/login";
+import { GoogleLogin } from "@react-oauth/google";
+import api from "../api";
 
 function Login() {
   const [email, setEmail] = useState("");
@@ -12,6 +11,7 @@ function Login() {
 
   const navigate = useNavigate();
 
+  // Login normal com e-mail e senha
   async function entrar(e) {
     e.preventDefault();
 
@@ -24,38 +24,83 @@ function Login() {
       setCarregando(true);
       setMensagem("");
 
-      const resposta = await fetch(API_LOGIN, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          email: email,
-          senha: senha
-        })
+      const resposta = await api.post("/login", {
+        email: email,
+        senha: senha
       });
 
-      const dados = await resposta.json();
-
-      if (!resposta.ok) {
-        setMensagem(dados.mensagem || "E-mail ou senha incorretos.");
-        return;
-      }
+      const dados = resposta.data;
 
       localStorage.setItem(
         "usuario",
         JSON.stringify(dados.usuario)
       );
 
-      setMensagem(dados.mensagem);
+      setMensagem(
+        dados.mensagem || "Login realizado com sucesso!"
+      );
 
       setTimeout(() => {
         navigate("/");
       }, 500);
-
     } catch (error) {
       console.error(error);
-      setMensagem("Não foi possível conectar ao servidor.");
+
+      if (error.response) {
+        setMensagem(
+          error.response.data?.mensagem ||
+            "E-mail ou senha incorretos."
+        );
+      } else {
+        setMensagem(
+          "Não foi possível conectar ao servidor."
+        );
+      }
+    } finally {
+      setCarregando(false);
+    }
+  }
+
+  // Login com Google
+  async function entrarComGoogle(credential) {
+    try {
+      setCarregando(true);
+      setMensagem("");
+
+      const resposta = await api.post("/login/google", {
+        credential: credential
+      });
+
+      const dados = resposta.data;
+
+      if (dados.usuario) {
+        localStorage.setItem(
+          "usuario",
+          JSON.stringify(dados.usuario)
+        );
+      }
+
+      setMensagem(
+        dados.mensagem ||
+          "Login com Google realizado com sucesso!"
+      );
+
+      setTimeout(() => {
+        navigate("/");
+      }, 500);
+    } catch (error) {
+      console.error(error);
+
+      if (error.response) {
+        setMensagem(
+          error.response.data?.mensagem ||
+            "Não foi possível entrar com Google."
+        );
+      } else {
+        setMensagem(
+          "Não foi possível conectar ao servidor."
+        );
+      }
     } finally {
       setCarregando(false);
     }
@@ -87,7 +132,10 @@ function Login() {
           </p>
         </section>
 
-        <form className="form-card" onSubmit={entrar}>
+        <form
+          className="form-card"
+          onSubmit={entrar}
+        >
           <label>
             E-mail
 
@@ -110,9 +158,66 @@ function Login() {
             />
           </label>
 
-          <button type="submit" disabled={carregando}>
+          <button
+            type="submit"
+            disabled={carregando}
+          >
             {carregando ? "Entrando..." : "Entrar"}
           </button>
+
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+              margin: "20px 0"
+            }}
+          >
+            <div
+              style={{
+                flex: 1,
+                height: "1px",
+                background: "#ddd"
+              }}
+            />
+
+            <span>ou</span>
+
+            <div
+              style={{
+                flex: 1,
+                height: "1px",
+                background: "#ddd"
+              }}
+            />
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "center",
+              marginBottom: "20px"
+            }}
+          >
+            <GoogleLogin
+              onSuccess={(credentialResponse) => {
+                if (credentialResponse.credential) {
+                  entrarComGoogle(
+                    credentialResponse.credential
+                  );
+                } else {
+                  setMensagem(
+                    "O Google não retornou o credential."
+                  );
+                }
+              }}
+              onError={() => {
+                setMensagem(
+                  "Não foi possível fazer login com Google."
+                );
+              }}
+            />
+          </div>
 
           {mensagem && (
             <p className="form-message">
@@ -133,4 +238,3 @@ function Login() {
 }
 
 export default Login;
-

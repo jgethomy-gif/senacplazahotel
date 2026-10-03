@@ -86,6 +86,7 @@ app.get("/cadastros", async function (req, res) {
         u.data_nascimento,
         u.email,
         u.senha,
+        u.google_id,
         i.cep,
         i.logradouro AS rua,
         i.numero,
@@ -133,6 +134,7 @@ app.get("/cadastros/:id", async function (req, res) {
         u.data_nascimento,
         u.email,
         u.senha,
+        u.google_id,
         i.cep,
         i.logradouro AS rua,
         i.numero,
@@ -293,6 +295,7 @@ app.post("/cadastros", async function (req, res) {
       mensagem: "Cliente cadastrado com sucesso!",
       id: idUsuario
     });
+
   } catch (error) {
     await conexao.rollback();
     conexao.release();
@@ -441,6 +444,7 @@ app.put("/cadastros/:id", async function (req, res) {
     res.json({
       mensagem: "Cliente atualizado com sucesso!"
     });
+
   } catch (error) {
     await conexao.rollback();
     conexao.release();
@@ -482,11 +486,154 @@ app.delete("/cadastros/:id", async function (req, res) {
     res.json({
       mensagem: "Cliente excluido com sucesso!"
     });
+
   } catch (error) {
     console.error(error);
 
     res.status(500).json({
       mensagem: "Erro ao excluir cliente.",
+      erro: error.message
+    });
+  }
+});
+
+/* =========================================================
+   PUT /ENDERECO
+========================================================= */
+
+app.put("/endereco", async function (req, res) {
+  try {
+    const {
+      id_usuario,
+      cep,
+      rua,
+      numero,
+      complemento,
+      unidade,
+      bairro,
+      cidade,
+      uf,
+      estado,
+      regiao,
+      ibge,
+      gia,
+      ddd,
+      siafi
+    } = req.body;
+
+    if (!id_usuario) {
+      return res.status(400).json({
+        mensagem: "Informe o id_usuario."
+      });
+    }
+
+    const [usuario] = await pool.query(
+      "SELECT id FROM usuarios WHERE id = ?",
+      [id_usuario]
+    );
+
+    if (usuario.length === 0) {
+      return res.status(404).json({
+        mensagem: "Usuario nao encontrado."
+      });
+    }
+
+    const [endereco] = await pool.query(
+      "SELECT id_usuario FROM info_usuario WHERE id_usuario = ?",
+      [id_usuario]
+    );
+
+    if (endereco.length === 0) {
+      await pool.query(
+        `
+        INSERT INTO info_usuario
+        (
+          id_usuario,
+          cep,
+          logradouro,
+          numero,
+          complemento,
+          unidade,
+          bairro,
+          localidade,
+          uf,
+          estado,
+          regiao,
+          ibge,
+          gia,
+          ddd,
+          siafi
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        [
+          id_usuario,
+          cep || null,
+          rua || null,
+          numero || null,
+          complemento || null,
+          unidade || null,
+          bairro || null,
+          cidade || null,
+          uf || null,
+          estado || null,
+          regiao || null,
+          ibge || null,
+          gia || null,
+          ddd || null,
+          siafi || null
+        ]
+      );
+    } else {
+      await pool.query(
+        `
+        UPDATE info_usuario
+        SET
+          cep = ?,
+          logradouro = ?,
+          numero = ?,
+          complemento = ?,
+          unidade = ?,
+          bairro = ?,
+          localidade = ?,
+          uf = ?,
+          estado = ?,
+          regiao = ?,
+          ibge = ?,
+          gia = ?,
+          ddd = ?,
+          siafi = ?
+        WHERE id_usuario = ?
+        `,
+        [
+          cep || null,
+          rua || null,
+          numero || null,
+          complemento || null,
+          unidade || null,
+          bairro || null,
+          cidade || null,
+          uf || null,
+          estado || null,
+          regiao || null,
+          ibge || null,
+          gia || null,
+          ddd || null,
+          siafi || null,
+          id_usuario
+        ]
+      );
+    }
+
+    res.json({
+      mensagem: "Endereco atualizado com sucesso!"
+    });
+
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      mensagem: "Erro ao atualizar endereco.",
       erro: error.message
     });
   }
@@ -531,6 +678,7 @@ app.get("/cep/:cep", async function (req, res) {
       ddd: data.ddd || "",
       siafi: data.siafi || ""
     });
+
   } catch (error) {
     console.error(error);
 
@@ -552,6 +700,7 @@ app.get("/hoteis", async function (req, res) {
     );
 
     res.json(hoteis);
+
   } catch (error) {
     console.error(error);
 
@@ -613,6 +762,7 @@ app.post("/hoteis", async function (req, res) {
       mensagem: "Hotel cadastrado com sucesso!",
       id: resultado.insertId
     });
+
   } catch (error) {
     console.error(error);
 
@@ -669,6 +819,7 @@ app.put("/hoteis/:id", async function (req, res) {
     res.json({
       mensagem: "Hotel atualizado com sucesso!"
     });
+
   } catch (error) {
     console.error(error);
 
@@ -701,6 +852,7 @@ app.delete("/hoteis/:id", async function (req, res) {
     res.json({
       mensagem: "Hotel excluido com sucesso!"
     });
+
   } catch (error) {
     console.error(error);
 
@@ -760,6 +912,7 @@ app.post("/login", async function (req, res) {
         email: usuario.email
       }
     });
+
   } catch (error) {
     console.error(error);
 
@@ -774,7 +927,7 @@ app.post("/login", async function (req, res) {
    LOGIN COM GOOGLE
 ========================================================= */
 
-app.post("/auth/google", async function (req, res) {
+app.post("/login/google", async function (req, res) {
   try {
     const { credential } = req.body;
 
@@ -783,6 +936,10 @@ app.post("/auth/google", async function (req, res) {
         mensagem: "Token do Google nao informado."
       });
     }
+
+    /* =====================================================
+       VERIFICAR ID TOKEN DO GOOGLE
+    ===================================================== */
 
     const ticket = await googleClient.verifyIdToken({
       idToken: credential,
@@ -808,36 +965,86 @@ app.post("/auth/google", async function (req, res) {
       });
     }
 
+    /* =====================================================
+       PROCURAR USUARIO PELO E-MAIL
+    ===================================================== */
+
     const [usuarios] = await pool.query(
       `
       SELECT
         id,
         nome,
-        email
+        email,
+        google_id
       FROM usuarios
       WHERE email = ?
       `,
       [email]
     );
 
+    /* =====================================================
+       USUARIO JA EXISTE
+    ===================================================== */
+
     if (usuarios.length > 0) {
+      const usuario = usuarios[0];
+
+      /* Se ainda nao tiver google_id, associar */
+      if (!usuario.google_id) {
+        await pool.query(
+          `
+          UPDATE usuarios
+          SET google_id = ?
+          WHERE id = ?
+          `,
+          [
+            googleId,
+            usuario.id
+          ]
+        );
+      }
+
       return res.json({
         mensagem: "Login com Google realizado com sucesso!",
         novoCadastro: false,
         usuario: {
-          id: usuarios[0].id,
-          nome: usuarios[0].nome,
-          email: usuarios[0].email,
+          id: usuario.id,
+          nome: usuario.nome,
+          email: usuario.email,
           googleId,
           foto
         }
       });
     }
 
-    res.json({
-      mensagem: "Google verificado com sucesso!",
-      novoCadastro: true,
+    /* =====================================================
+       CRIAR NOVO USUARIO GOOGLE
+    ===================================================== */
+
+    const [resultado] = await pool.query(
+      `
+      INSERT INTO usuarios
+      (
+        nome,
+        email,
+        google_id
+      )
+      VALUES (?, ?, ?)
+      `,
+      [
+        nome,
+        email,
+        googleId
+      ]
+    );
+
+    const novoUsuarioId = resultado.insertId;
+
+    return res.status(201).json({
+      mensagem: "Cadastro com Google realizado com sucesso!",
+      novoCadastro: false,
       usuario: {
+        id: novoUsuarioId,
         nome,
         email,
         googleId,
@@ -846,12 +1053,26 @@ app.post("/auth/google", async function (req, res) {
     });
 
   } catch (error) {
-    console.error("Erro no login com Google:", error);
+    console.error(
+      "Erro no login com Google:",
+      error
+    );
 
     res.status(401).json({
-      mensagem: "Nao foi possivel autenticar com o Google."
+      mensagem: "Nao foi possivel autenticar com o Google.",
+      erro: error.message
     });
   }
+});
+
+/* =========================================================
+   LOGOUT
+========================================================= */
+
+app.post("/logout", function (req, res) {
+  res.json({
+    mensagem: "Logout realizado com sucesso!"
+  });
 });
 
 /* =========================================================
