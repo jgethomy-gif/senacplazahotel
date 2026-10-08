@@ -1,9 +1,9 @@
+
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
 const API_CLIENTES = "http://localhost:3001/cadastros";
-const API_QUARTOS = "http://localhost:3002/quartos";
-
+const API_QUARTOS = "http://localhost:3001/quartos";
 
 function sair() {
   localStorage.removeItem("usuario");
@@ -13,49 +13,128 @@ function sair() {
 function Accueil() {
   const usuario = localStorage.getItem("usuario");
 
-  if (!usuario) {
-    window.location.href = "/login";
-    return null;
-  }
-
   const [clientes, setClientes] = useState([]);
   const [quartos, setQuartos] = useState([]);
   const [busca, setBusca] = useState("");
-  const [clienteSelecionado, setClienteSelecionado] = useState(null);
-  const [mostrarFormQuarto, setMostrarFormQuarto] = useState(false);
- const [quartoEditando, setQuartoEditando] = useState(null);
+  const [erroClientes, setErroClientes] = useState("");
 
-const [formQuarto, setFormQuarto] = useState({
+  const [clienteSelecionado, setClienteSelecionado] = useState(null);
+
+  const [mostrarFormQuarto, setMostrarFormQuarto] = useState(false);
+  const [quartoEditando, setQuartoEditando] = useState(null);
+
+  const [formQuarto, setFormQuarto] = useState({
     numero: "",
     tipo: "Solteiro",
     preco_diaria: "",
-    disponivel: 1
+    disponivel: 1,
   });
 
   useEffect(() => {
+    if (!usuario) {
+      window.location.href = "/login";
+      return;
+    }
+
     carregarClientes();
     carregarQuartos();
-  }, []);
+  }, [usuario]);
+
+  /* =========================================================
+     CLIENTES
+  ========================================================= */
 
   async function carregarClientes() {
     try {
+      setErroClientes("");
+
       const resposta = await fetch(API_CLIENTES);
+
+      if (!resposta.ok) {
+        throw new Error(
+          `Erro HTTP ${resposta.status} ao buscar clientes.`
+        );
+      }
+
       const dados = await resposta.json();
-      setClientes(Array.isArray(dados) ? dados : []);
+
+      console.log("Clientes recebidos da API:", dados);
+
+      if (Array.isArray(dados)) {
+        setClientes(dados);
+      } else {
+        setClientes([]);
+        setErroClientes("A API não retornou uma lista de clientes.");
+      }
     } catch (erro) {
       console.error("Erro ao carregar clientes:", erro);
+
+      setClientes([]);
+      setErroClientes(
+        "Não foi possível carregar os clientes. Verifique se o servidor está funcionando."
+      );
     }
   }
+
+  async function excluirCliente(idUsuario) {
+    const confirmar = window.confirm(
+      "Tem certeza que deseja excluir este cliente?"
+    );
+
+    if (!confirmar) return;
+
+    try {
+      const resposta = await fetch(
+        `${API_CLIENTES}/${idUsuario}`,
+        {
+          method: "DELETE",
+        }
+      );
+
+      const dados = await resposta.json().catch(() => ({}));
+
+      if (!resposta.ok) {
+        alert(
+          dados.mensagem ||
+            "Erro ao excluir cliente."
+        );
+        return;
+      }
+
+      alert("Cliente excluído com sucesso!");
+
+      setClienteSelecionado(null);
+
+      await carregarClientes();
+    } catch (erro) {
+      console.error("Erro ao excluir cliente:", erro);
+      alert("Erro de conexão com o servidor.");
+    }
+  }
+
+  /* =========================================================
+     QUARTOS
+  ========================================================= */
 
   async function carregarQuartos() {
     try {
       const resposta = await fetch(API_QUARTOS);
+
+      if (!resposta.ok) {
+        throw new Error("Erro ao buscar quartos.");
+      }
+
       const dados = await resposta.json();
+
       setQuartos(Array.isArray(dados) ? dados : []);
     } catch (erro) {
       console.error("Erro ao carregar quartos:", erro);
     }
   }
+
+  /* =========================================================
+     NOVO QUARTO
+  ========================================================= */
 
   function abrirNovoQuarto() {
     setQuartoEditando(null);
@@ -64,11 +143,15 @@ const [formQuarto, setFormQuarto] = useState({
       numero: "",
       tipo: "Solteiro",
       preco_diaria: "",
-      disponivel: 1
+      disponivel: 1,
     });
 
     setMostrarFormQuarto(true);
   }
+
+  /* =========================================================
+     EDITAR QUARTO
+  ========================================================= */
 
   function abrirEditarQuarto(quarto) {
     setQuartoEditando(quarto);
@@ -77,28 +160,65 @@ const [formQuarto, setFormQuarto] = useState({
       numero: quarto.numero,
       tipo: quarto.tipo,
       preco_diaria: quarto.preco_diaria,
-      disponivel: quarto.disponivel
+      disponivel: Number(quarto.disponivel),
     });
 
     setMostrarFormQuarto(true);
   }
 
+  /* =========================================================
+     FECHAR FORMULÁRIO
+  ========================================================= */
+
   function fecharFormQuarto() {
     setMostrarFormQuarto(false);
     setQuartoEditando(null);
+
+    setFormQuarto({
+      numero: "",
+      tipo: "Solteiro",
+      preco_diaria: "",
+      disponivel: 1,
+    });
   }
+
+  /* =========================================================
+     ALTERAR FORMULÁRIO
+  ========================================================= */
 
   function alterarFormQuarto(evento) {
     const { name, value } = evento.target;
 
     setFormQuarto((anterior) => ({
       ...anterior,
-      [name]: value
+      [name]: value,
     }));
   }
 
+  /* =========================================================
+     SALVAR / CRIAR QUARTO
+  ========================================================= */
+
   async function salvarQuarto(evento) {
     evento.preventDefault();
+
+    const numero = String(formQuarto.numero).trim();
+    const preco = Number(formQuarto.preco_diaria);
+
+    if (!numero) {
+      alert("Informe o número do quarto.");
+      return;
+    }
+
+    if (!formQuarto.tipo) {
+      alert("Selecione o tipo do quarto.");
+      return;
+    }
+
+    if (!formQuarto.preco_diaria || preco < 0) {
+      alert("Informe uma diária válida.");
+      return;
+    }
 
     try {
       const metodo = quartoEditando ? "PUT" : "POST";
@@ -110,20 +230,23 @@ const [formQuarto, setFormQuarto] = useState({
       const resposta = await fetch(url, {
         method: metodo,
         headers: {
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          numero: formQuarto.numero,
+          numero,
           tipo: formQuarto.tipo,
-          preco_diaria: Number(formQuarto.preco_diaria),
-          disponivel: Number(formQuarto.disponivel)
-        })
+          preco_diaria: preco,
+          disponivel: Number(formQuarto.disponivel),
+        }),
       });
 
-      const dados = await resposta.json();
+      const dados = await resposta.json().catch(() => ({}));
 
       if (!resposta.ok) {
-        alert(dados.mensagem || "Erro ao salvar quarto.");
+        alert(
+          dados.mensagem ||
+            "Erro ao salvar quarto."
+        );
         return;
       }
 
@@ -134,401 +257,853 @@ const [formQuarto, setFormQuarto] = useState({
       );
 
       fecharFormQuarto();
-      carregarQuartos();
+
+      await carregarQuartos();
     } catch (erro) {
       console.error("Erro ao salvar quarto:", erro);
       alert("Erro de conexão com o servidor.");
     }
   }
 
+  /* =========================================================
+     OCUPAR / LIBERAR QUARTO
+  ========================================================= */
+
+  async function alternarDisponibilidade(quarto) {
+    try {
+      const novaDisponibilidade =
+        Number(quarto.disponivel) === 1 ? 0 : 1;
+
+      const resposta = await fetch(
+        `${API_QUARTOS}/${quarto.id}/disponibilidade`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            disponivel: novaDisponibilidade,
+          }),
+        }
+      );
+
+      const dados = await resposta.json().catch(() => ({}));
+
+      if (!resposta.ok) {
+        alert(
+          dados.mensagem ||
+            "Erro ao alterar disponibilidade."
+        );
+        return;
+      }
+
+      await carregarQuartos();
+    } catch (erro) {
+      console.error(
+        "Erro ao alterar disponibilidade:",
+        erro
+      );
+
+      alert("Erro de conexão com o servidor.");
+    }
+  }
+
+  /* =========================================================
+     EXCLUIR QUARTO
+  ========================================================= */
+
   async function excluirQuarto(id) {
     const confirmar = window.confirm(
       "Tem certeza que deseja excluir este quarto?"
     );
 
-    if (!confirmar) {
-      return;
-    }
+    if (!confirmar) return;
 
     try {
-      const resposta = await fetch(`${API_QUARTOS}/${id}`, {
-        method: "DELETE"
-      });
+      const resposta = await fetch(
+        `${API_QUARTOS}/${id}`,
+        {
+          method: "DELETE",
+        }
+      );
 
-      const dados = await resposta.json();
+      const dados = await resposta.json().catch(() => ({}));
 
       if (!resposta.ok) {
-        alert(dados.mensagem || "Erro ao excluir quarto.");
+        alert(
+          dados.mensagem ||
+            "Erro ao excluir quarto."
+        );
         return;
       }
 
       alert("Quarto excluído com sucesso!");
-      carregarQuartos();
+
+      await carregarQuartos();
     } catch (erro) {
-      console.error("Erro ao excluir quarto:", erro);
+      console.error(
+        "Erro ao excluir quarto:",
+        erro
+      );
+
       alert("Erro de conexão com o servidor.");
     }
   }
 
-  async function alternarDisponibilidade(quarto) {
-    try {
-      const resposta = await fetch(`${API_QUARTOS}/${quarto.id}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          numero: quarto.numero,
-          tipo: quarto.tipo,
-          preco_diaria: Number(quarto.preco_diaria),
-          disponivel: Number(quarto.disponivel) === 1 ? 0 : 1
-        })
-      });
-
-      const dados = await resposta.json();
-
-      if (!resposta.ok) {
-        alert(dados.mensagem || "Erro ao alterar disponibilidade.");
-        return;
-      }
-
-      carregarQuartos();
-    } catch (erro) {
-      console.error("Erro ao alterar disponibilidade:", erro);
-      alert("Erro de conexão com o servidor.");
-    }
-  }
-
-  async function excluirCliente(id) {
-    const confirmar = window.confirm(
-      "Tem certeza que deseja excluir este cliente?"
-    );
-
-    if (!confirmar) {
-      return;
-    }
-
-    try {
-      const resposta = await fetch(`${API_CLIENTES}/${id}`, {
-        method: "DELETE"
-      });
-
-      if (!resposta.ok) {
-        alert("Erro ao excluir cliente.");
-        return;
-      }
-
-      alert("Cliente excluído com sucesso!");
-      carregarClientes();
-    } catch (erro) {
-      console.error("Erro ao excluir cliente:", erro);
-      alert("Erro de conexão com o servidor.");
-    }
-  }
+  /* =========================================================
+     BUSCA DE CLIENTES
+  ========================================================= */
 
   const clientesFiltrados = clientes.filter((cliente) => {
-    const texto = busca.toLowerCase();
+    const texto = busca.toLowerCase().trim();
 
     return (
-      String(cliente.nome || "").toLowerCase().includes(texto) ||
-      String(cliente.email || "").toLowerCase().includes(texto) ||
-      String(cliente.cpf || "").toLowerCase().includes(texto)
+      String(cliente.nome || "")
+        .toLowerCase()
+        .includes(texto) ||
+      String(cliente.email || "")
+        .toLowerCase()
+        .includes(texto) ||
+      String(cliente.cep || "")
+        .toLowerCase()
+        .includes(texto)
     );
   });
+
+  /* =========================================================
+     ESTATÍSTICAS
+  ========================================================= */
 
   const totalQuartos = quartos.length;
 
   const quartosDisponiveis = quartos.filter(
-    (quarto) => Number(quarto.disponivel) === 1
+    (quarto) =>
+      Number(quarto.disponivel) === 1
   ).length;
 
   const quartosOcupados = quartos.filter(
-    (quarto) => Number(quarto.disponivel) === 0
+    (quarto) =>
+      Number(quarto.disponivel) === 0
   ).length;
 
+  if (!usuario) {
+    return null;
+  }
+
   return (
-    <>
-      <header className="topo">
-        <div className="logo-area">
-          <h1>Hotel</h1>
-          <p>Sistema de Cadastro</p>
+    <div className="dashboard">
+
+      {/* =====================================================
+          SIDEBAR
+      ===================================================== */}
+
+      <aside className="sidebar">
+
+        <div className="sidebar-logo">
+
+          <div className="logo-icone">
+            SP
+          </div>
+
+          <div>
+            <strong>
+              Senac Plaza
+            </strong>
+
+            <span>
+              HOTEL
+            </span>
+          </div>
+
         </div>
 
-      <nav>
-  <Link to="/">Início</Link>
-  <Link to="/cadastro">Novo cadastro</Link>
-  <button type="button" className="botao-sair" onClick={sair}>
-  Sair
-</button>
-</nav>
-      </header>
 
-      <main className="container">
+        <div className="sidebar-menu">
 
-        <section className="hero">
-          <div>
-            <span className="numero-sistema">01</span>
-            <h2>SISTEMA DE CADASTRO</h2>
-            <p>Sistema online</p>
-          </div>
-        </section>
+          <span className="menu-titulo">
+            MENU PRINCIPAL
+          </span>
 
-        <section className="estatisticas">
 
-          <div className="estatistica">
-            <span className="icone">👥</span>
-            <strong>{clientes.length}</strong>
-            <small>TOTAL DE CLIENTES</small>
-          </div>
+          <Link
+            to="/"
+            className="menu-item ativo"
+          >
+            <span className="menu-icone">
+              ▦
+            </span>
 
-          <div className="estatistica">
-            <span className="icone">🏨</span>
-            <strong>{totalQuartos}</strong>
-            <small>TOTAL DE QUARTOS</small>
-          </div>
+            Dashboard
+          </Link>
 
-          <div className="estatistica">
-            <span className="icone">🟢</span>
-            <strong>{quartosDisponiveis}</strong>
-            <small>QUARTOS DISPONÍVEIS</small>
-          </div>
 
-          <div className="estatistica">
-            <span className="icone">🔴</span>
-            <strong>{quartosOcupados}</strong>
-            <small>QUARTOS OCUPADOS</small>
-          </div>
+          <Link
+            to="/cadastro"
+            className="menu-item"
+          >
+            <span className="menu-icone">
+              ＋
+            </span>
 
-        </section>
+            Novo cadastro
+          </Link>
 
-        <section className="info-grid">
+        </div>
 
-          <div className="info-card">
-            <strong>SISTEMA</strong>
-            <span>API / Express + MySQL</span>
-          </div>
 
-          <div className="info-card">
-            <strong>ENDEREÇO</strong>
-            <span>CEP / ViaCEP integrado</span>
-          </div>
+        <div className="sidebar-footer">
 
-          <div className="info-card">
-            <strong>QUARTOS</strong>
-            <span>Controle de disponibilidade</span>
-          </div>
+          <div className="sidebar-status">
 
-        </section>
+            <span className="status-ponto"></span>
 
-        <section className="secao">
-
-          <div className="secao-cabecalho">
             <div>
-              <h2>Quartos do Hotel</h2>
-              <p>Lista de quartos e disponibilidade</p>
+              <strong>
+                Sistema online
+              </strong>
+
+              <small>
+                API conectada
+              </small>
             </div>
+
+          </div>
+
+
+          <button
+            type="button"
+            className="sidebar-sair"
+            onClick={sair}
+          >
+            <span>
+              ↪
+            </span>
+
+            Sair
+          </button>
+
+        </div>
+
+      </aside>
+
+
+      {/* =====================================================
+          ÁREA PRINCIPAL
+      ===================================================== */}
+
+      <div className="dashboard-conteudo">
+
+        <header className="dashboard-topo">
+
+          <div>
+
+            <span className="dashboard-breadcrumb">
+              Senac Plaza Hotel / Dashboard
+            </span>
+
+            <h1>
+              Visão geral
+            </h1>
+
+            <p>
+              Gerencie clientes, quartos e
+              disponibilidade do hotel.
+            </p>
+
+          </div>
+
+
+          <div className="topo-acoes">
 
             <button
-              className="botao-principal"
+              type="button"
+              className="topo-novo"
               onClick={abrirNovoQuarto}
             >
-              + Novo quarto
+              <span>
+                ＋
+              </span>
+
+              Novo quarto
             </button>
+
+
+            <div className="usuario-avatar">
+              {String(usuario)
+                .charAt(0)
+                .toUpperCase()}
+            </div>
+
           </div>
 
-          {quartos.length === 0 ? (
-            <div className="vazio">
-              Nenhum quarto cadastrado.
-            </div>
-          ) : (
-            <div className="quartos-grid">
+        </header>
 
-              {quartos.map((quarto) => (
-                <article
-                  className="quarto-card"
-                  key={quarto.id}
-                >
 
-                  <div className="quarto-topo">
-                    <span>QUARTO</span>
-                    <strong>{quarto.numero}</strong>
-                  </div>
+        <main className="dashboard-main">
 
-                  <div
-                    className={
-                      Number(quarto.disponivel) === 1
-                        ? "status disponivel"
-                        : "status ocupado"
-                    }
-                  >
-                    {Number(quarto.disponivel) === 1
-                      ? "Disponível"
-                      : "Ocupado"}
-                  </div>
+          {/* =================================================
+              HERO
+          ================================================= */}
 
-                  <p>
-                    <strong>Tipo:</strong>{" "}
-                    {quarto.tipo}
-                  </p>
+          <section className="dashboard-hero">
 
-                  <p>
-                    <strong>Diária:</strong>{" "}
-                    {Number(
-                      quarto.preco_diaria
-                    ).toLocaleString("pt-BR", {
-                      style: "currency",
-                      currency: "BRL"
-                    })}
-                  </p>
+            <div className="hero-conteudo">
 
-                  <div className="quarto-acoes">
+              <span className="hero-tag">
+                SENAC PLAZA HOTEL
+              </span>
 
-                    <button
-                      className="botao-editar"
-                      onClick={() =>
-                        abrirEditarQuarto(quarto)
-                      }
-                    >
-                      Editar
-                    </button>
 
-                    <button
-                      className="botao-status"
-                      onClick={() =>
-                        alternarDisponibilidade(quarto)
-                      }
-                    >
-                      {Number(quarto.disponivel) === 1
-                        ? "Ocupar"
-                        : "Liberar"}
-                    </button>
+              <h2>
+                Bem-vindo ao seu
+                <br />
+                painel de controle.
+              </h2>
 
-                    <button
-                      className="botao-excluir"
-                      onClick={() =>
-                        excluirQuarto(quarto.id)
-                      }
-                    >
-                      Excluir
-                    </button>
 
-                  </div>
-
-                </article>
-              ))}
-
-            </div>
-          )}
-
-        </section>
-
-        <section className="secao">
-
-          <div className="secao-cabecalho">
-
-            <div>
-              <h2>Clientes cadastrados</h2>
               <p>
-                Consulte os clientes registrados no sistema
+                Acompanhe o funcionamento do hotel
+                e gerencie seus dados em um só lugar.
               </p>
+
             </div>
 
-            <input
-              className="campo-busca"
-              type="text"
-              placeholder="Buscar cliente..."
-              value={busca}
-              onChange={(e) => setBusca(e.target.value)}
-            />
 
-          </div>
+            <div className="hero-decoracao">
 
-          <div className="clientes-grid">
+              <div className="hero-circulo hero-circulo-1"></div>
 
-            {clientesFiltrados.map((cliente) => (
-              <article
-                className="cliente-card"
-                key={cliente.id}
-              >
+              <div className="hero-circulo hero-circulo-2"></div>
 
-                <span className="cliente-id">
-                  #{cliente.id}
+              <span className="hero-simbolo">
+                ✦
+              </span>
+
+            </div>
+
+          </section>
+
+
+          {/* =================================================
+              ESTATÍSTICAS
+          ================================================= */}
+
+          <section className="dashboard-estatisticas">
+
+            {/* CLIENTES */}
+
+            <div className="dashboard-stat">
+
+              <div className="stat-topo">
+
+                <span className="stat-icone clientes">
+                  👥
                 </span>
 
-                <h3>{cliente.nome}</h3>
+                <span className="stat-label">
+                  CLIENTES
+                </span>
+
+              </div>
+
+
+              <strong>
+                {clientes.length}
+              </strong>
+
+
+              <span className="stat-descricao">
+                Clientes cadastrados
+              </span>
+
+            </div>
+
+
+            {/* QUARTOS */}
+
+            <div className="dashboard-stat">
+
+              <div className="stat-topo">
+
+                <span className="stat-icone quartos">
+                  🏨
+                </span>
+
+                <span className="stat-label">
+                  QUARTOS
+                </span>
+
+              </div>
+
+
+              <strong>
+                {totalQuartos}
+              </strong>
+
+
+              <span className="stat-descricao">
+                Total de quartos
+              </span>
+
+            </div>
+
+
+            {/* DISPONÍVEIS */}
+
+            <div className="dashboard-stat">
+
+              <div className="stat-topo">
+
+                <span className="stat-icone disponivel">
+                  ✓
+                </span>
+
+                <span className="stat-label">
+                  DISPONÍVEIS
+                </span>
+
+              </div>
+
+
+              <strong>
+                {quartosDisponiveis}
+              </strong>
+
+
+              <span className="stat-descricao">
+                Prontos para receber
+              </span>
+
+            </div>
+
+
+            {/* OCUPADOS */}
+
+            <div className="dashboard-stat">
+
+              <div className="stat-topo">
+
+                <span className="stat-icone ocupado">
+                  ●
+                </span>
+
+                <span className="stat-label">
+                  OCUPADOS
+                </span>
+
+              </div>
+
+
+              <strong>
+                {quartosOcupados}
+              </strong>
+
+
+              <span className="stat-descricao">
+                Quartos em uso
+              </span>
+
+            </div>
+
+          </section>
+
+
+          {/* =================================================
+              QUARTOS
+          ================================================= */}
+
+          <section className="dashboard-secao">
+
+            <div className="dashboard-secao-topo">
+
+              <div>
+
+                <span className="secao-overline">
+                  HOSPEDAGEM
+                </span>
+
+                <h2>
+                  Quartos do hotel
+                </h2>
 
                 <p>
-                  <strong>E-mail:</strong>{" "}
-                  {cliente.email}
+                  Controle de quartos e disponibilidade.
                 </p>
 
-                <p>
-                  <strong>Endereço:</strong>{" "}
-                  {cliente.rua || "-"},{" "}
-                  {cliente.numero || "-"}
-                </p>
+              </div>
 
-                <p>
-                  <strong>Complemento:</strong>{" "}
-                  {cliente.complemento || "-"}
-                </p>
 
-                <p>
-                  <strong>Bairro:</strong>{" "}
-                  {cliente.bairro || "-"}
-                </p>
+              <button
+                type="button"
+                className="botao-principal dashboard-botao"
+                onClick={abrirNovoQuarto}
+              >
+                <span>
+                  ＋
+                </span>
 
-                <p>
-                  <strong>Localidade:</strong>{" "}
-                  {cliente.cidade || "-"} -{" "}
-                  {cliente.estado || "-"} -{" "}
-                  {cliente.uf || "-"}
-                </p>
+                Novo quarto
+              </button>
 
-                <p>
-                  <strong>CEP:</strong>{" "}
-                  {cliente.cep || "-"}
-                </p>
+            </div>
 
-                <div className="cliente-acoes">
 
-                  <button
-                    className="botao-detalhes"
-                    onClick={() =>
-                      setClienteSelecionado(cliente)
-                    }
+            {quartos.length === 0 ? (
+
+              <div className="vazio">
+                Nenhum quarto cadastrado.
+              </div>
+
+            ) : (
+
+              <div className="quartos-grid">
+
+                {quartos.map((quarto) => (
+
+                  <article
+                    className="quarto-card"
+                    key={quarto.id}
                   >
-                    Ver detalhes
-                  </button>
 
-                  <button
-                    className="botao-excluir"
-                    onClick={() =>
-                      excluirCliente(cliente.id)
-                    }
+                    <div className="quarto-card-top">
+
+                      <div className="quarto-numero">
+
+                        <span>
+                          QUARTO
+                        </span>
+
+                        <strong>
+                          {quarto.numero}
+                        </strong>
+
+                      </div>
+
+
+                      <span
+                        className={
+                          Number(quarto.disponivel) === 1
+                            ? "status disponivel"
+                            : "status ocupado"
+                        }
+                      >
+                        {Number(quarto.disponivel) === 1
+                          ? "Disponível"
+                          : "Ocupado"}
+                      </span>
+
+                    </div>
+
+
+                    <div className="quarto-info">
+
+                      <div>
+
+                        <span>
+                          TIPO
+                        </span>
+
+                        <strong>
+                          {quarto.tipo}
+                        </strong>
+
+                      </div>
+
+
+                      <div>
+
+                        <span>
+                          DIÁRIA
+                        </span>
+
+                        <strong>
+                          {Number(
+                            quarto.preco_diaria
+                          ).toLocaleString(
+                            "pt-BR",
+                            {
+                              style: "currency",
+                              currency: "BRL",
+                            }
+                          )}
+                        </strong>
+
+                      </div>
+
+                    </div>
+
+
+                    <div className="quarto-acoes">
+
+                      <button
+                        type="button"
+                        className="botao-editar"
+                        onClick={() =>
+                          abrirEditarQuarto(quarto)
+                        }
+                      >
+                        ✎ Editar
+                      </button>
+
+
+                      <button
+                        type="button"
+                        className="botao-status"
+                        onClick={() =>
+                          alternarDisponibilidade(
+                            quarto
+                          )
+                        }
+                      >
+                        {Number(quarto.disponivel) === 1
+                          ? "● Ocupar"
+                          : "✓ Liberar"}
+                      </button>
+
+
+                      <button
+                        type="button"
+                        className="botao-excluir"
+                        onClick={() =>
+                          excluirQuarto(
+                            quarto.id
+                          )
+                        }
+                      >
+                        Excluir
+                      </button>
+
+                    </div>
+
+                  </article>
+
+                ))}
+
+              </div>
+
+            )}
+
+          </section>
+
+
+          {/* =================================================
+              CLIENTES
+          ================================================= */}
+
+          <section className="dashboard-secao">
+
+            <div className="dashboard-secao-topo clientes-topo">
+
+              <div>
+
+                <span className="secao-overline">
+                  CLIENTES
+                </span>
+
+                <h2>
+                  Clientes cadastrados
+                </h2>
+
+                <p>
+                  Consulte e gerencie os clientes registrados.
+                </p>
+
+              </div>
+
+
+              <div className="busca-container">
+
+                <span className="busca-icone">
+                  ⌕
+                </span>
+
+
+                <input
+                  className="campo-busca"
+                  type="text"
+                  placeholder="Buscar por nome, e-mail ou CEP..."
+                  value={busca}
+                  onChange={(e) =>
+                    setBusca(e.target.value)
+                  }
+                />
+
+              </div>
+
+            </div>
+
+
+            {erroClientes ? (
+
+              <div className="vazio">
+                {erroClientes}
+              </div>
+
+            ) : clientesFiltrados.length === 0 ? (
+
+              <div className="vazio">
+
+                {busca
+                  ? "Nenhum cliente encontrado."
+                  : "Nenhum cliente cadastrado."}
+
+              </div>
+
+            ) : (
+
+              <div className="clientes-grid">
+
+                {clientesFiltrados.map((cliente) => (
+
+                  <article
+                    className="cliente-card"
+                    key={cliente.id_usuario}
                   >
-                    Excluir
-                  </button>
 
-                </div>
+                    <div className="cliente-card-top">
 
-              </article>
-            ))}
+                      <div className="cliente-avatar">
 
-          </div>
+                        {String(
+                          cliente.nome || "C"
+                        )
+                          .charAt(0)
+                          .toUpperCase()}
 
-        </section>
+                      </div>
 
-      </main>
+
+                      <div className="cliente-identidade">
+
+                        <span>
+                          CLIENTE #{cliente.id_usuario}
+                        </span>
+
+                        <h3>
+                          {cliente.nome || "-"}
+                        </h3>
+
+                      </div>
+
+                    </div>
+
+
+                    <div className="cliente-dados">
+
+                      <div>
+
+                        <span>
+                          E-MAIL
+                        </span>
+
+                        <strong>
+                          {cliente.email || "-"}
+                        </strong>
+
+                      </div>
+
+
+                      <div>
+
+                        <span>
+                          ENDEREÇO
+                        </span>
+
+                        <strong>
+                          {cliente.rua || "-"},{" "}
+                          {cliente.numero || "-"}
+                        </strong>
+
+                      </div>
+
+
+                      <div>
+
+                        <span>
+                          LOCALIDADE
+                        </span>
+
+                        <strong>
+                          {cliente.cidade || "-"}{" "}
+                          -{" "}
+                          {cliente.uf || "-"}
+                        </strong>
+
+                      </div>
+
+                    </div>
+
+
+                    <div className="cliente-acoes">
+
+                      <button
+                        type="button"
+                        className="botao-detalhes"
+                        onClick={() =>
+                          setClienteSelecionado(
+                            cliente
+                          )
+                        }
+                      >
+                        Ver detalhes
+                      </button>
+
+
+                      <button
+                        type="button"
+                        className="botao-excluir"
+                        onClick={() =>
+                          excluirCliente(
+                            cliente.id_usuario
+                          )
+                        }
+                      >
+                        Excluir
+                      </button>
+
+                    </div>
+
+                  </article>
+
+                ))}
+
+              </div>
+
+            )}
+
+          </section>
+
+        </main>
+
+      </div>
+
+
+      {/* =====================================================
+          MODAL — NOVO / EDITAR QUARTO
+      ===================================================== */}
 
       {mostrarFormQuarto && (
-        <div className="modal-fundo">
 
-          <div className="modal">
+        <div
+          className="modal-fundo"
+          onClick={fecharFormQuarto}
+        >
+
+          <div
+            className="modal"
+            onClick={(e) =>
+              e.stopPropagation()
+            }
+          >
 
             <div className="modal-cabecalho">
 
               <div>
+
+                <span className="modal-overline">
+                  HOSPEDAGEM
+                </span>
+
                 <h2>
                   {quartoEditando
                     ? "Editar quarto"
@@ -536,11 +1111,14 @@ const [formQuarto, setFormQuarto] = useState({
                 </h2>
 
                 <p>
-                  Preencha os dados do quarto
+                  Preencha os dados do quarto.
                 </p>
+
               </div>
 
+
               <button
+                type="button"
                 className="modal-fechar"
                 onClick={fecharFormQuarto}
               >
@@ -549,9 +1127,13 @@ const [formQuarto, setFormQuarto] = useState({
 
             </div>
 
+
             <form onSubmit={salvarQuarto}>
 
+              {/* NÚMERO */}
+
               <label>
+
                 Número do quarto
 
                 <input
@@ -562,9 +1144,14 @@ const [formQuarto, setFormQuarto] = useState({
                   placeholder="Ex.: 402"
                   required
                 />
+
               </label>
 
+
+              {/* TIPO */}
+
               <label>
+
                 Tipo
 
                 <select
@@ -572,6 +1159,7 @@ const [formQuarto, setFormQuarto] = useState({
                   value={formQuarto.tipo}
                   onChange={alterarFormQuarto}
                 >
+
                   <option value="Solteiro">
                     Solteiro
                   </option>
@@ -587,10 +1175,16 @@ const [formQuarto, setFormQuarto] = useState({
                   <option value="Suíte">
                     Suíte
                   </option>
+
                 </select>
+
               </label>
 
+
+              {/* DIÁRIA */}
+
               <label>
+
                 Diária
 
                 <input
@@ -603,9 +1197,14 @@ const [formQuarto, setFormQuarto] = useState({
                   step="0.01"
                   required
                 />
+
               </label>
 
+
+              {/* DISPONIBILIDADE */}
+
               <label>
+
                 Disponibilidade
 
                 <select
@@ -613,6 +1212,7 @@ const [formQuarto, setFormQuarto] = useState({
                   value={formQuarto.disponivel}
                   onChange={alterarFormQuarto}
                 >
+
                   <option value="1">
                     Disponível
                   </option>
@@ -620,8 +1220,13 @@ const [formQuarto, setFormQuarto] = useState({
                   <option value="0">
                     Ocupado
                   </option>
+
                 </select>
+
               </label>
+
+
+              {/* BOTÕES */}
 
               <div className="form-acoes">
 
@@ -632,6 +1237,7 @@ const [formQuarto, setFormQuarto] = useState({
                 >
                   Cancelar
                 </button>
+
 
                 <button
                   type="submit"
@@ -649,9 +1255,16 @@ const [formQuarto, setFormQuarto] = useState({
           </div>
 
         </div>
+
       )}
 
+
+      {/* =====================================================
+          MODAL — CLIENTE
+      ===================================================== */}
+
       {clienteSelecionado && (
+
         <div
           className="modal-fundo"
           onClick={() =>
@@ -660,7 +1273,7 @@ const [formQuarto, setFormQuarto] = useState({
         >
 
           <div
-            className="modal"
+            className="modal modal-cliente"
             onClick={(e) =>
               e.stopPropagation()
             }
@@ -668,15 +1281,40 @@ const [formQuarto, setFormQuarto] = useState({
 
             <div className="modal-cabecalho">
 
-              <div>
-                <h2>
-                  {clienteSelecionado.nome}
-                </h2>
+              <div className="modal-cliente-titulo">
 
-                <p>Detalhes do cliente</p>
+                <div className="cliente-avatar modal-avatar">
+
+                  {String(
+                    clienteSelecionado.nome || "C"
+                  )
+                    .charAt(0)
+                    .toUpperCase()}
+
+                </div>
+
+
+                <div>
+
+                  <span className="modal-overline">
+                    CLIENTE #{clienteSelecionado.id_usuario}
+                  </span>
+
+                  <h2>
+                    {clienteSelecionado.nome || "-"}
+                  </h2>
+
+                  <p>
+                    Informações completas do cliente.
+                  </p>
+
+                </div>
+
               </div>
 
+
               <button
+                type="button"
                 className="modal-fechar"
                 onClick={() =>
                   setClienteSelecionado(null)
@@ -687,78 +1325,137 @@ const [formQuarto, setFormQuarto] = useState({
 
             </div>
 
+
             <div className="detalhes">
 
-              <p>
-                <strong>ID:</strong>{" "}
-                {clienteSelecionado.id}
-              </p>
+              <div className="detalhe-item">
 
-              <p>
-                <strong>Nome:</strong>{" "}
-                {clienteSelecionado.nome}
-              </p>
+                <span>
+                  NOME COMPLETO
+                </span>
 
-              <p>
-                <strong>E-mail:</strong>{" "}
-                {clienteSelecionado.email}
-              </p>
+                <strong>
+                  {clienteSelecionado.nome || "-"}
+                </strong>
 
-              <p>
-                <strong>CPF:</strong>{" "}
-                {clienteSelecionado.cpf || "-"}
-              </p>
+              </div>
 
-              <p>
-                <strong>Telefone:</strong>{" "}
-                {clienteSelecionado.telefone || "-"}
-              </p>
 
-              <p>
-                <strong>Endereço:</strong>{" "}
-                {clienteSelecionado.rua || "-"},{" "}
-                {clienteSelecionado.numero || "-"}
-              </p>
+              <div className="detalhe-item">
 
-              <p>
-                <strong>Complemento:</strong>{" "}
-                {clienteSelecionado.complemento || "-"}
-              </p>
+                <span>
+                  E-MAIL
+                </span>
 
-              <p>
-                <strong>Bairro:</strong>{" "}
-                {clienteSelecionado.bairro || "-"}
-              </p>
+                <strong>
+                  {clienteSelecionado.email || "-"}
+                </strong>
 
-              <p>
-                <strong>Cidade:</strong>{" "}
-                {clienteSelecionado.cidade || "-"}
-              </p>
+              </div>
 
-              <p>
-                <strong>Estado:</strong>{" "}
-                {clienteSelecionado.estado || "-"}
-              </p>
 
-              <p>
-                <strong>UF:</strong>{" "}
-                {clienteSelecionado.uf || "-"}
-              </p>
+              <div className="detalhe-item detalhe-largo">
 
-              <p>
-                <strong>CEP:</strong>{" "}
-                {clienteSelecionado.cep || "-"}
-              </p>
+                <span>
+                  ENDEREÇO
+                </span>
+
+                <strong>
+                  {clienteSelecionado.rua || "-"},{" "}
+                  {clienteSelecionado.numero || "-"}
+                </strong>
+
+              </div>
+
+
+              <div className="detalhe-item">
+
+                <span>
+                  COMPLEMENTO
+                </span>
+
+                <strong>
+                  {clienteSelecionado.complemento || "-"}
+                </strong>
+
+              </div>
+
+
+              <div className="detalhe-item">
+
+                <span>
+                  BAIRRO
+                </span>
+
+                <strong>
+                  {clienteSelecionado.bairro || "-"}
+                </strong>
+
+              </div>
+
+
+              <div className="detalhe-item">
+
+                <span>
+                  CIDADE
+                </span>
+
+                <strong>
+                  {clienteSelecionado.cidade || "-"}
+                </strong>
+
+              </div>
+
+
+              <div className="detalhe-item">
+
+                <span>
+                  ESTADO
+                </span>
+
+                <strong>
+                  {clienteSelecionado.estado || "-"}
+                </strong>
+
+              </div>
+
+
+              <div className="detalhe-item">
+
+                <span>
+                  UF
+                </span>
+
+                <strong>
+                  {clienteSelecionado.uf || "-"}
+                </strong>
+
+              </div>
+
+
+              <div className="detalhe-item">
+
+                <span>
+                  CEP
+                </span>
+
+                <strong>
+                  {clienteSelecionado.cep || "-"}
+                </strong>
+
+              </div>
 
             </div>
 
           </div>
 
         </div>
+
       )}
 
-    </>
+    </div>
   );
 }
 
 export default Accueil;
+

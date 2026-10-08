@@ -1,30 +1,23 @@
-import express from "express";
-import cors from "cors";
-import mysql from "mysql2/promise";
-import { OAuth2Client } from "google-auth-library";
+require("dotenv").config();
+
+const express = require("express");
+const cors = require("cors");
+const mysql = require("mysql2/promise");
+const { OAuth2Client } = require("google-auth-library");
 
 const app = express();
-
-const PORT = 3001;
-
-/* =========================================================
-   GOOGLE
-========================================================= */
-
-const GOOGLE_CLIENT_ID =
-  "124183329443-7e6lu1jrdlqhkm15ofjstfi9j9emhnuq.apps.googleusercontent.com";
-
-const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
-
-/* =========================================================
-   CONFIGURAÇÕES
-========================================================= */
 
 app.use(cors());
 app.use(express.json());
 
+const PORT = 3001;
+
+const googleClient = new OAuth2Client(
+  process.env.GOOGLE_CLIENT_ID
+);
+
 /* =========================================================
-   BANCO DE DADOS
+   CONEXÃO COM BANCO DE DADOS
 ========================================================= */
 
 const pool = mysql.createPool({
@@ -39,7 +32,7 @@ const pool = mysql.createPool({
 });
 
 /* =========================================================
-   TESTE DO SERVIDOR
+   TESTE DA API
 ========================================================= */
 
 app.get("/", function (req, res) {
@@ -63,6 +56,7 @@ app.get("/teste-db", async function (req, res) {
       mensagem: "Banco conectado com sucesso!",
       resultado
     });
+
   } catch (error) {
     console.error(error);
 
@@ -74,19 +68,219 @@ app.get("/teste-db", async function (req, res) {
 });
 
 /* =========================================================
+   CEP
+========================================================= */
+
+app.get("/cep/:cep", async function (req, res) {
+  try {
+    const { cep } = req.params;
+
+    const cepLimpo = cep.replace(/\D/g, "");
+
+    if (cepLimpo.length !== 8) {
+      return res.status(400).json({
+        mensagem: "CEP invalido."
+      });
+    }
+
+    const resposta = await fetch(
+      `https://viacep.com.br/ws/${cepLimpo}/json/`
+    );
+
+    const dados = await resposta.json();
+
+    if (dados.erro) {
+      return res.status(404).json({
+        mensagem: "CEP nao encontrado."
+      });
+    }
+
+    res.json(dados);
+
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      mensagem: "Erro ao consultar CEP.",
+      erro: error.message
+    });
+  }
+});
+
+/* =========================================================
+   LOGIN NORMAL
+========================================================= */
+
+app.post("/login", async function (req, res) {
+  try {
+    const { email, senha } = req.body;
+
+    if (!email || !senha) {
+      return res.status(400).json({
+        mensagem: "Informe o e-mail e a senha."
+      });
+    }
+
+    const [usuarios] = await pool.query(
+      `
+      SELECT
+        id,
+        nome,
+        data_nascimento,
+        email,
+        senha
+      FROM usuarios
+      WHERE email = ?
+      LIMIT 1
+      `,
+      [email]
+    );
+
+    if (usuarios.length === 0) {
+      return res.status(401).json({
+        mensagem: "E-mail ou senha incorretos."
+      });
+    }
+
+    const usuario = usuarios[0];
+
+    if (usuario.senha !== senha) {
+      return res.status(401).json({
+        mensagem: "E-mail ou senha incorretos."
+      });
+    }
+
+    res.json({
+      mensagem: "Login realizado com sucesso!",
+      usuario: {
+        id: usuario.id,
+        nome: usuario.nome,
+        data_nascimento: usuario.data_nascimento,
+        email: usuario.email
+      }
+    });
+
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      mensagem: "Erro ao realizar login.",
+      erro: error.message
+    });
+  }
+});
+
+/* =========================================================
+   LOGIN COM GOOGLE
+========================================================= */
+
+app.post("/auth/google", async function (req, res) {
+  try {
+    const { credential } = req.body;
+
+    if (!credential) {
+      return res.status(400).json({
+        mensagem: "Token do Google nao informado."
+      });
+    }
+
+    if (!process.env.GOOGLE_CLIENT_ID) {
+      return res.status(500).json({
+        mensagem:
+          "GOOGLE_CLIENT_ID nao configurado no servidor."
+      });
+    }
+
+    const ticket = await googleClient.verifyIdToken({
+      idToken: credential,
+      audience: process.env.GOOGLE_CLIENT_ID
+    });
+
+    const payload = ticket.getPayload();
+
+    if (!payload) {
+      return res.status(401).json({
+        mensagem:
+          "Nao foi possivel validar a conta Google."
+      });
+    }
+
+    const googleId = payload.sub;
+    const email = payload.email;
+    const nome = payload.name || "";
+    const emailVerificado = payload.email_verified;
+
+    if (!email || !emailVerificado) {
+      return res.status(401).json({
+        mensagem:
+          "O e-mail da conta Google nao foi verificado."
+      });
+    }
+
+    const [usuarios] = await pool.query(
+      `
+      SELECT
+        id,
+        nome,
+        data_nascimento,
+        email
+      FROM usuarios
+      WHERE email = ?
+      LIMIT 1
+      `,
+      [email]
+    );
+
+    if (usuarios.length === 0) {
+      return res.status(404).json({
+        mensagem:
+          "Esta conta Google ainda nao possui cadastro. Faça o cadastro primeiro.",
+        google: {
+          nome,
+          email,
+          googleId
+        }
+      });
+    }
+
+    const usuario = usuarios[0];
+
+    res.json({
+      mensagem:
+        "Login com Google realizado com sucesso!",
+      usuario: {
+        id: usuario.id,
+        nome: usuario.nome,
+        data_nascimento: usuario.data_nascimento,
+        email: usuario.email,
+        googleId
+      }
+    });
+
+  } catch (error) {
+    console.error("Erro Google:", error);
+
+    res.status(401).json({
+      mensagem:
+        "Nao foi possivel autenticar com o Google."
+    });
+  }
+});
+
+/* =========================================================
    CLIENTES - LISTAR
 ========================================================= */
 
 app.get("/cadastros", async function (req, res) {
   try {
-    const [clientes] = await pool.query(`
+    const [cadastros] = await pool.query(`
       SELECT
-        u.id,
+        u.id AS id_usuario,
         u.nome,
         u.data_nascimento,
         u.email,
         u.senha,
-        u.google_id,
+
         i.cep,
         i.logradouro AS rua,
         i.numero,
@@ -101,85 +295,33 @@ app.get("/cadastros", async function (req, res) {
         i.gia,
         i.ddd,
         i.siafi
+
       FROM usuarios u
+
       LEFT JOIN info_usuario i
-        ON i.id_usuario = u.id
+        ON u.id = i.id_usuario
+
       ORDER BY u.id DESC
     `);
 
-    res.json(clientes);
+    res.json(cadastros);
+
   } catch (error) {
     console.error(error);
 
     res.status(500).json({
-      mensagem: "Erro ao buscar clientes.",
+      mensagem: "Erro ao buscar cadastros.",
       erro: error.message
     });
   }
 });
 
 /* =========================================================
-   CLIENTE - BUSCAR POR ID
-========================================================= */
-
-app.get("/cadastros/:id", async function (req, res) {
-  try {
-    const { id } = req.params;
-
-    const [clientes] = await pool.query(
-      `
-      SELECT
-        u.id,
-        u.nome,
-        u.data_nascimento,
-        u.email,
-        u.senha,
-        u.google_id,
-        i.cep,
-        i.logradouro AS rua,
-        i.numero,
-        i.complemento,
-        i.unidade,
-        i.bairro,
-        i.localidade AS cidade,
-        i.uf,
-        i.estado,
-        i.regiao,
-        i.ibge,
-        i.gia,
-        i.ddd,
-        i.siafi
-      FROM usuarios u
-      LEFT JOIN info_usuario i
-        ON i.id_usuario = u.id
-      WHERE u.id = ?
-      `,
-      [id]
-    );
-
-    if (clientes.length === 0) {
-      return res.status(404).json({
-        mensagem: "Cliente nao encontrado."
-      });
-    }
-
-    res.json(clientes[0]);
-  } catch (error) {
-    console.error(error);
-
-    res.status(500).json({
-      mensagem: "Erro ao buscar cliente.",
-      erro: error.message
-    });
-  }
-});
-
-/* =========================================================
-   CLIENTE - CADASTRAR
+   CLIENTES - CADASTRAR
 ========================================================= */
 
 app.post("/cadastros", async function (req, res) {
-  const conexao = await pool.getConnection();
+  let conexao;
 
   try {
     const {
@@ -187,13 +329,17 @@ app.post("/cadastros", async function (req, res) {
       data_nascimento,
       email,
       senha,
+      cpf,
+      telefone,
       cep,
       rua,
+      logradouro,
       numero,
       complemento,
       unidade,
       bairro,
       cidade,
+      localidade,
       uf,
       estado,
       regiao,
@@ -203,28 +349,48 @@ app.post("/cadastros", async function (req, res) {
       siafi
     } = req.body;
 
+    const ruaFinal = rua || logradouro;
+    const cidadeFinal = cidade || localidade;
+
     if (
       !nome ||
       !data_nascimento ||
       !email ||
       !senha ||
       !cep ||
-      !rua ||
+      !ruaFinal ||
       !numero ||
       !bairro ||
-      !cidade ||
+      !cidadeFinal ||
       !uf ||
       !estado ||
       !regiao
     ) {
-      conexao.release();
-
       return res.status(400).json({
-        mensagem: "Preencha os campos obrigatorios."
+        mensagem: "Preencha todos os campos obrigatorios."
       });
     }
 
+    conexao = await pool.getConnection();
+
     await conexao.beginTransaction();
+
+    const [usuarioExistente] = await conexao.query(
+      `
+      SELECT id
+      FROM usuarios
+      WHERE email = ?
+      `,
+      [email]
+    );
+
+    if (usuarioExistente.length > 0) {
+      await conexao.rollback();
+
+      return res.status(409).json({
+        mensagem: "Este email ja esta cadastrado."
+      });
+    }
 
     const [usuario] = await conexao.query(
       `
@@ -272,12 +438,12 @@ app.post("/cadastros", async function (req, res) {
       [
         idUsuario,
         cep,
-        rua,
+        ruaFinal,
         numero,
         complemento || null,
         unidade || null,
         bairro,
-        cidade,
+        cidadeFinal,
         uf,
         estado,
         regiao,
@@ -289,178 +455,28 @@ app.post("/cadastros", async function (req, res) {
     );
 
     await conexao.commit();
-    conexao.release();
 
     res.status(201).json({
-      mensagem: "Cliente cadastrado com sucesso!",
-      id: idUsuario
+      mensagem: "Cadastro realizado com sucesso!",
+      id_usuario: idUsuario
     });
 
   } catch (error) {
-    await conexao.rollback();
-    conexao.release();
+    if (conexao) {
+      await conexao.rollback();
+    }
 
     console.error(error);
-
-    if (error.code === "ER_DUP_ENTRY") {
-      return res.status(409).json({
-        mensagem: "Este e-mail ja esta cadastrado."
-      });
-    }
 
     res.status(500).json({
       mensagem: "Erro ao cadastrar cliente.",
       erro: error.message
     });
-  }
-});
 
-/* =========================================================
-   CLIENTE - ATUALIZAR
-========================================================= */
-
-app.put("/cadastros/:id", async function (req, res) {
-  const conexao = await pool.getConnection();
-
-  try {
-    const { id } = req.params;
-
-    const {
-      nome,
-      data_nascimento,
-      email,
-      senha,
-      cep,
-      rua,
-      numero,
-      complemento,
-      unidade,
-      bairro,
-      cidade,
-      uf,
-      estado,
-      regiao,
-      ibge,
-      gia,
-      ddd,
-      siafi
-    } = req.body;
-
-    const [clientes] = await conexao.query(
-      "SELECT id FROM usuarios WHERE id = ?",
-      [id]
-    );
-
-    if (clientes.length === 0) {
+  } finally {
+    if (conexao) {
       conexao.release();
-
-      return res.status(404).json({
-        mensagem: "Cliente nao encontrado."
-      });
     }
-
-    await conexao.beginTransaction();
-
-    if (senha) {
-      await conexao.query(
-        `
-        UPDATE usuarios
-        SET
-          nome = ?,
-          data_nascimento = ?,
-          email = ?,
-          senha = ?
-        WHERE id = ?
-        `,
-        [
-          nome,
-          data_nascimento,
-          email,
-          senha,
-          id
-        ]
-      );
-    } else {
-      await conexao.query(
-        `
-        UPDATE usuarios
-        SET
-          nome = ?,
-          data_nascimento = ?,
-          email = ?
-        WHERE id = ?
-        `,
-        [
-          nome,
-          data_nascimento,
-          email,
-          id
-        ]
-      );
-    }
-
-    await conexao.query(
-      `
-      UPDATE info_usuario
-      SET
-        cep = ?,
-        logradouro = ?,
-        numero = ?,
-        complemento = ?,
-        unidade = ?,
-        bairro = ?,
-        localidade = ?,
-        uf = ?,
-        estado = ?,
-        regiao = ?,
-        ibge = ?,
-        gia = ?,
-        ddd = ?,
-        siafi = ?
-      WHERE id_usuario = ?
-      `,
-      [
-        cep,
-        rua,
-        numero,
-        complemento || null,
-        unidade || null,
-        bairro,
-        cidade,
-        uf,
-        estado,
-        regiao,
-        ibge || null,
-        gia || null,
-        ddd || null,
-        siafi || null,
-        id
-      ]
-    );
-
-    await conexao.commit();
-    conexao.release();
-
-    res.json({
-      mensagem: "Cliente atualizado com sucesso!"
-    });
-
-  } catch (error) {
-    await conexao.rollback();
-    conexao.release();
-
-    console.error(error);
-
-    if (error.code === "ER_DUP_ENTRY") {
-      return res.status(409).json({
-        mensagem: "Este e-mail ja esta cadastrado."
-      });
-    }
-
-    res.status(500).json({
-      mensagem: "Erro ao atualizar cliente.",
-      erro: error.message
-    });
   }
 });
 
@@ -469,611 +485,916 @@ app.put("/cadastros/:id", async function (req, res) {
 ========================================================= */
 
 app.delete("/cadastros/:id", async function (req, res) {
+  let conexao;
+
   try {
     const { id } = req.params;
 
-    const [resultado] = await pool.query(
-      "DELETE FROM usuarios WHERE id = ?",
+    conexao = await pool.getConnection();
+
+    await conexao.beginTransaction();
+
+    const [usuario] = await conexao.query(
+      `
+      SELECT id
+      FROM usuarios
+      WHERE id = ?
+      `,
       [id]
     );
 
-    if (resultado.affectedRows === 0) {
+    if (usuario.length === 0) {
+      await conexao.rollback();
+
       return res.status(404).json({
         mensagem: "Cliente nao encontrado."
       });
     }
+
+    await conexao.query(
+      `
+      DELETE FROM info_usuario
+      WHERE id_usuario = ?
+      `,
+      [id]
+    );
+
+    await conexao.query(
+      `
+      DELETE FROM usuarios
+      WHERE id = ?
+      `,
+      [id]
+    );
+
+    await conexao.commit();
 
     res.json({
       mensagem: "Cliente excluido com sucesso!"
     });
 
   } catch (error) {
+    if (conexao) {
+      await conexao.rollback();
+    }
+
     console.error(error);
 
     res.status(500).json({
       mensagem: "Erro ao excluir cliente.",
       erro: error.message
     });
+
+  } finally {
+    if (conexao) {
+      conexao.release();
+    }
   }
 });
 
 /* =========================================================
-   PUT /ENDERECO
+   QUARTOS - LISTAR
 ========================================================= */
 
-app.put("/endereco", async function (req, res) {
+app.get("/quartos", async function (req, res) {
+  try {
+    const [quartos] = await pool.query(`
+      SELECT
+        id,
+        numero,
+        tipo,
+        preco_diaria,
+        disponivel
+      FROM quartos
+      ORDER BY numero ASC
+    `);
+
+    res.json(quartos);
+
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      mensagem: "Erro ao buscar quartos.",
+      erro: error.message
+    });
+  }
+});
+
+/* =========================================================
+   QUARTO - BUSCAR POR ID
+========================================================= */
+
+app.get("/quartos/:id", async function (req, res) {
+  try {
+    const { id } = req.params;
+
+    const [quartos] = await pool.query(
+      `
+      SELECT
+        id,
+        numero,
+        tipo,
+        preco_diaria,
+        disponivel
+      FROM quartos
+      WHERE id = ?
+      `,
+      [id]
+    );
+
+    if (quartos.length === 0) {
+      return res.status(404).json({
+        mensagem: "Quarto nao encontrado."
+      });
+    }
+
+    res.json(quartos[0]);
+
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      mensagem: "Erro ao buscar quarto.",
+      erro: error.message
+    });
+  }
+});
+
+/* =========================================================
+   QUARTO - CADASTRAR
+========================================================= */
+
+app.post("/quartos", async function (req, res) {
   try {
     const {
-      id_usuario,
-      cep,
-      rua,
       numero,
-      complemento,
-      unidade,
-      bairro,
-      cidade,
-      uf,
-      estado,
-      regiao,
-      ibge,
-      gia,
-      ddd,
-      siafi
-    } = req.body;
-
-    if (!id_usuario) {
-      return res.status(400).json({
-        mensagem: "Informe o id_usuario."
-      });
-    }
-
-    const [usuario] = await pool.query(
-      "SELECT id FROM usuarios WHERE id = ?",
-      [id_usuario]
-    );
-
-    if (usuario.length === 0) {
-      return res.status(404).json({
-        mensagem: "Usuario nao encontrado."
-      });
-    }
-
-    const [endereco] = await pool.query(
-      "SELECT id_usuario FROM info_usuario WHERE id_usuario = ?",
-      [id_usuario]
-    );
-
-    if (endereco.length === 0) {
-      await pool.query(
-        `
-        INSERT INTO info_usuario
-        (
-          id_usuario,
-          cep,
-          logradouro,
-          numero,
-          complemento,
-          unidade,
-          bairro,
-          localidade,
-          uf,
-          estado,
-          regiao,
-          ibge,
-          gia,
-          ddd,
-          siafi
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `,
-        [
-          id_usuario,
-          cep || null,
-          rua || null,
-          numero || null,
-          complemento || null,
-          unidade || null,
-          bairro || null,
-          cidade || null,
-          uf || null,
-          estado || null,
-          regiao || null,
-          ibge || null,
-          gia || null,
-          ddd || null,
-          siafi || null
-        ]
-      );
-    } else {
-      await pool.query(
-        `
-        UPDATE info_usuario
-        SET
-          cep = ?,
-          logradouro = ?,
-          numero = ?,
-          complemento = ?,
-          unidade = ?,
-          bairro = ?,
-          localidade = ?,
-          uf = ?,
-          estado = ?,
-          regiao = ?,
-          ibge = ?,
-          gia = ?,
-          ddd = ?,
-          siafi = ?
-        WHERE id_usuario = ?
-        `,
-        [
-          cep || null,
-          rua || null,
-          numero || null,
-          complemento || null,
-          unidade || null,
-          bairro || null,
-          cidade || null,
-          uf || null,
-          estado || null,
-          regiao || null,
-          ibge || null,
-          gia || null,
-          ddd || null,
-          siafi || null,
-          id_usuario
-        ]
-      );
-    }
-
-    res.json({
-      mensagem: "Endereco atualizado com sucesso!"
-    });
-
-  } catch (error) {
-    console.error(error);
-
-    res.status(500).json({
-      mensagem: "Erro ao atualizar endereco.",
-      erro: error.message
-    });
-  }
-});
-
-/* =========================================================
-   VIA CEP
-========================================================= */
-
-app.get("/cep/:cep", async function (req, res) {
-  try {
-    const cep = req.params.cep.replace(/\D/g, "");
-
-    if (cep.length !== 8) {
-      return res.status(400).json({
-        mensagem: "CEP invalido."
-      });
-    }
-
-    const resposta = await fetch(
-      `https://viacep.com.br/ws/${cep}/json/`
-    );
-
-    const data = await resposta.json();
-
-    if (data.erro) {
-      return res.status(404).json({
-        mensagem: "CEP nao encontrado."
-      });
-    }
-
-    res.json({
-      cep: data.cep || "",
-      rua: data.logradouro || "",
-      bairro: data.bairro || "",
-      cidade: data.localidade || "",
-      uf: data.uf || "",
-      estado: data.estado || "",
-      regiao: data.regiao || "",
-      ibge: data.ibge || "",
-      gia: data.gia || "",
-      ddd: data.ddd || "",
-      siafi: data.siafi || ""
-    });
-
-  } catch (error) {
-    console.error(error);
-
-    res.status(500).json({
-      mensagem: "Erro ao consultar ViaCEP.",
-      erro: error.message
-    });
-  }
-});
-
-/* =========================================================
-   HOTEIS - LISTAR
-========================================================= */
-
-app.get("/hoteis", async function (req, res) {
-  try {
-    const [hoteis] = await pool.query(
-      "SELECT * FROM hoteis ORDER BY id DESC"
-    );
-
-    res.json(hoteis);
-
-  } catch (error) {
-    console.error(error);
-
-    res.status(500).json({
-      mensagem: "Erro ao buscar hoteis.",
-      erro: error.message
-    });
-  }
-});
-
-/* =========================================================
-   HOTEIS - CADASTRAR
-========================================================= */
-
-app.post("/hoteis", async function (req, res) {
-  try {
-    const {
-      nome,
-      endereco,
-      cidade,
-      telefone,
-      preco_diaria
+      tipo,
+      preco_diaria,
+      disponivel
     } = req.body;
 
     if (
-      !nome ||
-      !endereco ||
-      !cidade ||
-      !telefone ||
-      !preco_diaria
+      !numero ||
+      !tipo ||
+      preco_diaria === undefined
     ) {
       return res.status(400).json({
-        mensagem: "Preencha todos os campos."
+        mensagem: "Preencha numero, tipo e preco_diaria."
       });
     }
 
     const [resultado] = await pool.query(
       `
-      INSERT INTO hoteis
+      INSERT INTO quartos
       (
-        nome,
-        endereco,
-        cidade,
-        telefone,
-        preco_diaria
+        numero,
+        tipo,
+        preco_diaria,
+        disponivel
       )
-      VALUES (?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?)
       `,
       [
-        nome,
-        endereco,
-        cidade,
-        telefone,
-        preco_diaria
+        numero,
+        tipo,
+        preco_diaria,
+        disponivel === undefined
+          ? 1
+          : Number(disponivel) === 1 ? 1 : 0
       ]
     );
 
     res.status(201).json({
-      mensagem: "Hotel cadastrado com sucesso!",
+      mensagem: "Quarto cadastrado com sucesso!",
       id: resultado.insertId
     });
 
   } catch (error) {
     console.error(error);
 
+    if (error.code === "ER_DUP_ENTRY") {
+      return res.status(409).json({
+        mensagem:
+          "Este numero de quarto ja esta cadastrado."
+      });
+    }
+
     res.status(500).json({
-      mensagem: "Erro ao cadastrar hotel.",
+      mensagem: "Erro ao cadastrar quarto.",
       erro: error.message
     });
   }
 });
 
 /* =========================================================
-   HOTEIS - ATUALIZAR
+   QUARTO - ATUALIZAR
 ========================================================= */
 
-app.put("/hoteis/:id", async function (req, res) {
+app.put("/quartos/:id", async function (req, res) {
   try {
     const { id } = req.params;
 
     const {
-      nome,
-      endereco,
-      cidade,
-      telefone,
-      preco_diaria
+      numero,
+      tipo,
+      preco_diaria,
+      disponivel
     } = req.body;
+
+    if (
+      !numero ||
+      !tipo ||
+      preco_diaria === undefined
+    ) {
+      return res.status(400).json({
+        mensagem: "Preencha numero, tipo e preco_diaria."
+      });
+    }
 
     const [resultado] = await pool.query(
       `
-      UPDATE hoteis
+      UPDATE quartos
       SET
-        nome = ?,
-        endereco = ?,
-        cidade = ?,
-        telefone = ?,
-        preco_diaria = ?
+        numero = ?,
+        tipo = ?,
+        preco_diaria = ?,
+        disponivel = ?
       WHERE id = ?
       `,
       [
-        nome,
-        endereco,
-        cidade,
-        telefone,
+        numero,
+        tipo,
         preco_diaria,
+        Number(disponivel) === 1 ? 1 : 0,
         id
       ]
     );
 
     if (resultado.affectedRows === 0) {
       return res.status(404).json({
-        mensagem: "Hotel nao encontrado."
+        mensagem: "Quarto nao encontrado."
       });
     }
 
     res.json({
-      mensagem: "Hotel atualizado com sucesso!"
+      mensagem: "Quarto atualizado com sucesso!"
     });
 
   } catch (error) {
     console.error(error);
 
+    if (error.code === "ER_DUP_ENTRY") {
+      return res.status(409).json({
+        mensagem:
+          "Este numero de quarto ja esta cadastrado."
+      });
+    }
+
     res.status(500).json({
-      mensagem: "Erro ao atualizar hotel.",
+      mensagem: "Erro ao atualizar quarto.",
       erro: error.message
     });
   }
 });
 
 /* =========================================================
-   HOTEIS - EXCLUIR
+   QUARTO - ALTERAR DISPONIBILIDADE
 ========================================================= */
 
-app.delete("/hoteis/:id", async function (req, res) {
+app.patch(
+  "/quartos/:id/disponibilidade",
+  async function (req, res) {
+    try {
+      const { id } = req.params;
+      const { disponivel } = req.body;
+
+      if (disponivel === undefined) {
+        return res.status(400).json({
+          mensagem:
+            "Informe a disponibilidade do quarto."
+        });
+      }
+
+      const [resultado] = await pool.query(
+        `
+        UPDATE quartos
+        SET disponivel = ?
+        WHERE id = ?
+        `,
+        [
+          Number(disponivel) === 1 ? 1 : 0,
+          id
+        ]
+      );
+
+      if (resultado.affectedRows === 0) {
+        return res.status(404).json({
+          mensagem: "Quarto nao encontrado."
+        });
+      }
+
+      res.json({
+        mensagem:
+          Number(disponivel) === 1
+            ? "Quarto marcado como disponivel!"
+            : "Quarto marcado como ocupado!"
+      });
+
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).json({
+        mensagem:
+          "Erro ao alterar disponibilidade.",
+        erro: error.message
+      });
+    }
+  }
+);
+
+/* =========================================================
+   QUARTO - EXCLUIR
+========================================================= */
+
+app.delete("/quartos/:id", async function (req, res) {
   try {
     const { id } = req.params;
 
     const [resultado] = await pool.query(
-      "DELETE FROM hoteis WHERE id = ?",
+      `
+      DELETE FROM quartos
+      WHERE id = ?
+      `,
       [id]
     );
 
     if (resultado.affectedRows === 0) {
       return res.status(404).json({
-        mensagem: "Hotel nao encontrado."
+        mensagem: "Quarto nao encontrado."
       });
     }
 
     res.json({
-      mensagem: "Hotel excluido com sucesso!"
+      mensagem: "Quarto excluido com sucesso!"
     });
 
   } catch (error) {
     console.error(error);
 
     res.status(500).json({
-      mensagem: "Erro ao excluir hotel.",
+      mensagem: "Erro ao excluir quarto.",
       erro: error.message
     });
   }
 });
 
 /* =========================================================
-   LOGIN NORMAL
+   RESERVAS - LISTAR
 ========================================================= */
 
-app.post("/login", async function (req, res) {
+app.get("/reservas", async function (req, res) {
   try {
-    const { email, senha } = req.body;
+    const [reservas] = await pool.query(`
+      SELECT
+        r.id,
+        r.id_usuario,
+        r.id_quarto,
+        r.data_entrada,
+        r.data_saida,
+        r.quantidade_hospedes,
+        r.status,
+        r.registrado_em,
 
-    if (!email || !senha) {
-      return res.status(400).json({
-        mensagem: "Informe o e-mail e a senha."
+        u.nome AS cliente_nome,
+        u.email AS cliente_email,
+
+        q.numero AS quarto_numero,
+        q.tipo AS quarto_tipo,
+        q.preco_diaria
+
+      FROM reservas r
+
+      INNER JOIN usuarios u
+        ON r.id_usuario = u.id
+
+      INNER JOIN quartos q
+        ON r.id_quarto = q.id
+
+      ORDER BY r.id DESC
+    `);
+
+    res.json(reservas);
+
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      mensagem: "Erro ao buscar reservas.",
+      erro: error.message
+    });
+  }
+});
+
+/* =========================================================
+   RESERVA - BUSCAR POR ID
+========================================================= */
+
+app.get("/reservas/:id", async function (req, res) {
+  try {
+    const { id } = req.params;
+
+    const [reservas] = await pool.query(
+      `
+      SELECT
+        r.id,
+        r.id_usuario,
+        r.id_quarto,
+        r.data_entrada,
+        r.data_saida,
+        r.quantidade_hospedes,
+        r.status,
+        r.registrado_em,
+
+        u.nome AS cliente_nome,
+        u.email AS cliente_email,
+
+        q.numero AS quarto_numero,
+        q.tipo AS quarto_tipo,
+        q.preco_diaria
+
+      FROM reservas r
+
+      INNER JOIN usuarios u
+        ON r.id_usuario = u.id
+
+      INNER JOIN quartos q
+        ON r.id_quarto = q.id
+
+      WHERE r.id = ?
+      `,
+      [id]
+    );
+
+    if (reservas.length === 0) {
+      return res.status(404).json({
+        mensagem: "Reserva nao encontrada."
       });
     }
 
-    const [usuarios] = await pool.query(
+    res.json(reservas[0]);
+
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      mensagem: "Erro ao buscar reserva.",
+      erro: error.message
+    });
+  }
+});
+
+/* =========================================================
+   RESERVA - CRIAR
+========================================================= */
+
+app.post("/reservas", async function (req, res) {
+  let conexao;
+
+  try {
+    const {
+      id_usuario,
+      id_quarto,
+      data_entrada,
+      data_saida,
+      quantidade_hospedes
+    } = req.body;
+
+    if (
+      !id_usuario ||
+      !id_quarto ||
+      !data_entrada ||
+      !data_saida ||
+      !quantidade_hospedes
+    ) {
+      return res.status(400).json({
+        mensagem:
+          "Preencha cliente, quarto, data de entrada, data de saida e quantidade de hospedes."
+      });
+    }
+
+    if (data_saida <= data_entrada) {
+      return res.status(400).json({
+        mensagem:
+          "A data de saida deve ser posterior a data de entrada."
+      });
+    }
+
+    conexao = await pool.getConnection();
+
+    await conexao.beginTransaction();
+
+    const [usuarios] = await conexao.query(
       `
       SELECT
         id,
-        nome,
-        email,
-        senha
+        nome
       FROM usuarios
-      WHERE email = ?
+      WHERE id = ?
       `,
-      [email]
+      [id_usuario]
     );
 
     if (usuarios.length === 0) {
-      return res.status(401).json({
-        mensagem: "E-mail ou senha incorretos."
+      await conexao.rollback();
+
+      return res.status(404).json({
+        mensagem: "Cliente nao encontrado."
       });
     }
 
-    const usuario = usuarios[0];
-
-    if (usuario.senha !== senha) {
-      return res.status(401).json({
-        mensagem: "E-mail ou senha incorretos."
-      });
-    }
-
-    res.json({
-      mensagem: "Login realizado com sucesso!",
-      usuario: {
-        id: usuario.id,
-        nome: usuario.nome,
-        email: usuario.email
-      }
-    });
-
-  } catch (error) {
-    console.error(error);
-
-    res.status(500).json({
-      mensagem: "Erro ao realizar login.",
-      erro: error.message
-    });
-  }
-});
-
-/* =========================================================
-   LOGIN COM GOOGLE
-========================================================= */
-
-app.post("/login/google", async function (req, res) {
-  try {
-    const { credential } = req.body;
-
-    if (!credential) {
-      return res.status(400).json({
-        mensagem: "Token do Google nao informado."
-      });
-    }
-
-    /* =====================================================
-       VERIFICAR ID TOKEN DO GOOGLE
-    ===================================================== */
-
-    const ticket = await googleClient.verifyIdToken({
-      idToken: credential,
-      audience: GOOGLE_CLIENT_ID
-    });
-
-    const payload = ticket.getPayload();
-
-    if (!payload) {
-      return res.status(401).json({
-        mensagem: "Token do Google invalido."
-      });
-    }
-
-    const googleId = payload.sub;
-    const nome = payload.name || "";
-    const email = payload.email || "";
-    const foto = payload.picture || "";
-
-    if (!email) {
-      return res.status(400).json({
-        mensagem: "O Google nao retornou um e-mail."
-      });
-    }
-
-    /* =====================================================
-       PROCURAR USUARIO PELO E-MAIL
-    ===================================================== */
-
-    const [usuarios] = await pool.query(
+    const [quartos] = await conexao.query(
       `
       SELECT
         id,
-        nome,
-        email,
-        google_id
-      FROM usuarios
-      WHERE email = ?
+        numero,
+        preco_diaria,
+        disponivel
+      FROM quartos
+      WHERE id = ?
+      FOR UPDATE
       `,
-      [email]
+      [id_quarto]
     );
 
-    /* =====================================================
-       USUARIO JA EXISTE
-    ===================================================== */
+    if (quartos.length === 0) {
+      await conexao.rollback();
 
-    if (usuarios.length > 0) {
-      const usuario = usuarios[0];
-
-      /* Se ainda nao tiver google_id, associar */
-      if (!usuario.google_id) {
-        await pool.query(
-          `
-          UPDATE usuarios
-          SET google_id = ?
-          WHERE id = ?
-          `,
-          [
-            googleId,
-            usuario.id
-          ]
-        );
-      }
-
-      return res.json({
-        mensagem: "Login com Google realizado com sucesso!",
-        novoCadastro: false,
-        usuario: {
-          id: usuario.id,
-          nome: usuario.nome,
-          email: usuario.email,
-          googleId,
-          foto
-        }
+      return res.status(404).json({
+        mensagem: "Quarto nao encontrado."
       });
     }
 
-    /* =====================================================
-       CRIAR NOVO USUARIO GOOGLE
-    ===================================================== */
+    if (Number(quartos[0].disponivel) !== 1) {
+      await conexao.rollback();
 
-    const [resultado] = await pool.query(
+      return res.status(409).json({
+        mensagem: "Este quarto esta ocupado."
+      });
+    }
+
+    const [conflitos] = await conexao.query(
       `
-      INSERT INTO usuarios
-      (
-        nome,
-        email,
-        google_id
-      )
-      VALUES (?, ?, ?)
+      SELECT id
+      FROM reservas
+      WHERE id_quarto = ?
+        AND status IN ('confirmada', 'pendente')
+        AND data_entrada < ?
+        AND data_saida > ?
       `,
       [
-        nome,
-        email,
-        googleId
+        id_quarto,
+        data_saida,
+        data_entrada
       ]
     );
 
-    const novoUsuarioId = resultado.insertId;
+    if (conflitos.length > 0) {
+      await conexao.rollback();
 
-    return res.status(201).json({
-      mensagem: "Cadastro com Google realizado com sucesso!",
-      novoCadastro: false,
-      usuario: {
-        id: novoUsuarioId,
-        nome,
-        email,
-        googleId,
-        foto
-      }
+      return res.status(409).json({
+        mensagem:
+          "Este quarto ja possui uma reserva nesse periodo."
+      });
+    }
+
+    const [resultado] = await conexao.query(
+      `
+      INSERT INTO reservas
+      (
+        id_usuario,
+        id_quarto,
+        data_entrada,
+        data_saida,
+        quantidade_hospedes,
+        status
+      )
+      VALUES (?, ?, ?, ?, ?, 'confirmada')
+      `,
+      [
+        id_usuario,
+        id_quarto,
+        data_entrada,
+        data_saida,
+        quantidade_hospedes
+      ]
+    );
+
+    await conexao.query(
+      `
+      UPDATE quartos
+      SET disponivel = 0
+      WHERE id = ?
+      `,
+      [id_quarto]
+    );
+
+    await conexao.commit();
+
+    res.status(201).json({
+      mensagem: "Reserva criada com sucesso!",
+      id: resultado.insertId
     });
 
   } catch (error) {
-    console.error(
-      "Erro no login com Google:",
-      error
-    );
+    if (conexao) {
+      await conexao.rollback();
+    }
 
-    res.status(401).json({
-      mensagem: "Nao foi possivel autenticar com o Google.",
+    console.error(error);
+
+    res.status(500).json({
+      mensagem: "Erro ao criar reserva.",
       erro: error.message
     });
+
+  } finally {
+    if (conexao) {
+      conexao.release();
+    }
   }
 });
 
 /* =========================================================
-   LOGOUT
+   RESERVA - ATUALIZAR
 ========================================================= */
 
-app.post("/logout", function (req, res) {
-  res.json({
-    mensagem: "Logout realizado com sucesso!"
-  });
+app.put("/reservas/:id", async function (req, res) {
+  let conexao;
+
+  try {
+    const { id } = req.params;
+
+    const {
+      id_usuario,
+      id_quarto,
+      data_entrada,
+      data_saida,
+      quantidade_hospedes,
+      status
+    } = req.body;
+
+    if (
+      !id_usuario ||
+      !id_quarto ||
+      !data_entrada ||
+      !data_saida ||
+      !quantidade_hospedes ||
+      !status
+    ) {
+      return res.status(400).json({
+        mensagem:
+          "Preencha todos os campos da reserva."
+      });
+    }
+
+    if (data_saida <= data_entrada) {
+      return res.status(400).json({
+        mensagem:
+          "A data de saida deve ser posterior a data de entrada."
+      });
+    }
+
+    conexao = await pool.getConnection();
+
+    await conexao.beginTransaction();
+
+    const [reservaAtual] = await conexao.query(
+      `
+      SELECT *
+      FROM reservas
+      WHERE id = ?
+      FOR UPDATE
+      `,
+      [id]
+    );
+
+    if (reservaAtual.length === 0) {
+      await conexao.rollback();
+
+      return res.status(404).json({
+        mensagem: "Reserva nao encontrada."
+      });
+    }
+
+    const quartoAntigo = reservaAtual[0].id_quarto;
+
+    const [quartoNovo] = await conexao.query(
+      `
+      SELECT *
+      FROM quartos
+      WHERE id = ?
+      FOR UPDATE
+      `,
+      [id_quarto]
+    );
+
+    if (quartoNovo.length === 0) {
+      await conexao.rollback();
+
+      return res.status(404).json({
+        mensagem: "Quarto nao encontrado."
+      });
+    }
+
+    if (
+      Number(id_quarto) !== Number(quartoAntigo) &&
+      status === "confirmada" &&
+      Number(quartoNovo[0].disponivel) !== 1
+    ) {
+      await conexao.rollback();
+
+      return res.status(409).json({
+        mensagem: "O novo quarto esta ocupado."
+      });
+    }
+
+    await conexao.query(
+      `
+      UPDATE reservas
+      SET
+        id_usuario = ?,
+        id_quarto = ?,
+        data_entrada = ?,
+        data_saida = ?,
+        quantidade_hospedes = ?,
+        status = ?
+      WHERE id = ?
+      `,
+      [
+        id_usuario,
+        id_quarto,
+        data_entrada,
+        data_saida,
+        quantidade_hospedes,
+        status,
+        id
+      ]
+    );
+
+    if (
+      Number(id_quarto) !== Number(quartoAntigo)
+    ) {
+      await conexao.query(
+        `
+        UPDATE quartos
+        SET disponivel = 1
+        WHERE id = ?
+        `,
+        [quartoAntigo]
+      );
+    }
+
+    if (status === "confirmada") {
+      await conexao.query(
+        `
+        UPDATE quartos
+        SET disponivel = 0
+        WHERE id = ?
+        `,
+        [id_quarto]
+      );
+    }
+
+    if (
+      status === "cancelada" ||
+      status === "finalizada"
+    ) {
+      await conexao.query(
+        `
+        UPDATE quartos
+        SET disponivel = 1
+        WHERE id = ?
+        `,
+        [id_quarto]
+      );
+    }
+
+    await conexao.commit();
+
+    res.json({
+      mensagem: "Reserva atualizada com sucesso!"
+    });
+
+  } catch (error) {
+    if (conexao) {
+      await conexao.rollback();
+    }
+
+    console.error(error);
+
+    res.status(500).json({
+      mensagem: "Erro ao atualizar reserva.",
+      erro: error.message
+    });
+
+  } finally {
+    if (conexao) {
+      conexao.release();
+    }
+  }
 });
+
+/* =========================================================
+   RESERVA - CANCELAR
+========================================================= */
+
+app.patch(
+  "/reservas/:id/cancelar",
+  async function (req, res) {
+    let conexao;
+
+    try {
+      const { id } = req.params;
+
+      conexao = await pool.getConnection();
+
+      await conexao.beginTransaction();
+
+      const [reservas] = await conexao.query(
+        `
+        SELECT
+          id_quarto,
+          status
+        FROM reservas
+        WHERE id = ?
+        FOR UPDATE
+        `,
+        [id]
+      );
+
+      if (reservas.length === 0) {
+        await conexao.rollback();
+
+        return res.status(404).json({
+          mensagem: "Reserva nao encontrada."
+        });
+      }
+
+      if (reservas[0].status === "cancelada") {
+        await conexao.rollback();
+
+        return res.status(400).json({
+          mensagem:
+            "Esta reserva ja esta cancelada."
+        });
+      }
+
+      await conexao.query(
+        `
+        UPDATE reservas
+        SET status = 'cancelada'
+        WHERE id = ?
+        `,
+        [id]
+      );
+
+      await conexao.query(
+        `
+        UPDATE quartos
+        SET disponivel = 1
+        WHERE id = ?
+        `,
+        [reservas[0].id_quarto]
+      );
+
+      await conexao.commit();
+
+      res.json({
+        mensagem:
+          "Reserva cancelada com sucesso!"
+      });
+
+    } catch (error) {
+      if (conexao) {
+        await conexao.rollback();
+      }
+
+      console.error(error);
+
+      res.status(500).json({
+        mensagem:
+          "Erro ao cancelar reserva.",
+        erro: error.message
+      });
+
+    } finally {
+      if (conexao) {
+        conexao.release();
+      }
+    }
+  }
+);
 
 /* =========================================================
    INICIAR SERVIDOR

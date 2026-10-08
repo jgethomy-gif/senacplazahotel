@@ -6,16 +6,18 @@ import api from "../api";
 function Login() {
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
+  const [mostrarSenha, setMostrarSenha] = useState(false);
   const [mensagem, setMensagem] = useState("");
+  const [tipoMensagem, setTipoMensagem] = useState("");
   const [carregando, setCarregando] = useState(false);
 
   const navigate = useNavigate();
 
-  // Login normal com e-mail e senha
   async function entrar(e) {
     e.preventDefault();
 
     if (!email || !senha) {
+      setTipoMensagem("erro");
       setMensagem("Preencha o e-mail e a senha.");
       return;
     }
@@ -23,10 +25,11 @@ function Login() {
     try {
       setCarregando(true);
       setMensagem("");
+      setTipoMensagem("");
 
       const resposta = await api.post("/login", {
-        email: email,
-        senha: senha
+        email,
+        senha,
       });
 
       const dados = resposta.data;
@@ -36,6 +39,7 @@ function Login() {
         JSON.stringify(dados.usuario)
       );
 
+      setTipoMensagem("sucesso");
       setMensagem(
         dados.mensagem || "Login realizado com sucesso!"
       );
@@ -45,6 +49,8 @@ function Login() {
       }, 500);
     } catch (error) {
       console.error(error);
+
+      setTipoMensagem("erro");
 
       if (error.response) {
         setMensagem(
@@ -61,14 +67,15 @@ function Login() {
     }
   }
 
-  // Login com Google
   async function entrarComGoogle(credential) {
     try {
       setCarregando(true);
       setMensagem("");
+      setTipoMensagem("");
 
-      const resposta = await api.post("/login/google", {
-        credential: credential
+      // Rota correta do backend
+      const resposta = await api.post("/auth/google", {
+        credential,
       });
 
       const dados = resposta.data;
@@ -80,6 +87,7 @@ function Login() {
         );
       }
 
+      setTipoMensagem("sucesso");
       setMensagem(
         dados.mensagem ||
           "Login com Google realizado com sucesso!"
@@ -90,6 +98,8 @@ function Login() {
       }, 500);
     } catch (error) {
       console.error(error);
+
+      setTipoMensagem("erro");
 
       if (error.response) {
         setMensagem(
@@ -107,98 +117,162 @@ function Login() {
   }
 
   return (
-    <div className="page">
-      <header className="topbar">
-        <div>
-          <h1>Hotel</h1>
-          <p>Sistema de Cadastro</p>
-        </div>
+    <div className="login-page">
 
-        <nav>
-          <Link to="/">Início</Link>
-          <Link to="/login">Login</Link>
-          <Link to="/cadastro">Novo cadastro</Link>
-        </nav>
+      {/* Fundo decorativo */}
+      <div className="login-decoration login-decoration-1"></div>
+      <div className="login-decoration login-decoration-2"></div>
+
+      {/* Cabeçalho */}
+      <header className="login-header">
+        <Link to="/" className="login-brand">
+          <span className="login-brand-icon">SP</span>
+
+          <span className="login-brand-text">
+            <strong>Senac Plaza</strong>
+            <small>HOTEL</small>
+          </span>
+        </Link>
+
+        <Link
+          to="/cadastro"
+          className="login-header-link"
+        >
+          Novo cadastro
+        </Link>
       </header>
 
-      <main className="content">
-        <section className="hero">
-          <span className="eyebrow">01</span>
+      {/* Conteúdo */}
+      <main className="login-container">
 
-          <h2>Login</h2>
+        <section className="login-intro">
+          <span className="login-overline">
+            SENAC PLAZA HOTEL
+          </span>
+
+          <h1>
+            Bem-vindo
+            <br />
+            de volta.
+          </h1>
 
           <p>
-            Entre no sistema utilizando seu e-mail e senha.
+            Acesse o sistema para gerenciar clientes,
+            quartos e informações do hotel.
           </p>
+
+          <div className="login-line"></div>
+
+          <span className="login-security">
+            🔒 Ambiente seguro
+          </span>
         </section>
 
-        <form
-          className="form-card"
-          onSubmit={entrar}
-        >
-          <label>
-            E-mail
+        {/* Card */}
+        <section className="login-card">
 
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="Digite seu e-mail"
-            />
-          </label>
+          <div className="login-card-header">
+            <div>
+              <span className="login-card-overline">
+                ACESSO
+              </span>
 
-          <label>
-            Senha
+              <h2>Entrar no sistema</h2>
 
-            <input
-              type="password"
-              value={senha}
-              onChange={(e) => setSenha(e.target.value)}
-              placeholder="Digite sua senha"
-            />
-          </label>
+              <p>
+                Informe seus dados para continuar.
+              </p>
+            </div>
 
-          <button
-            type="submit"
-            disabled={carregando}
-          >
-            {carregando ? "Entrando..." : "Entrar"}
-          </button>
-
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "10px",
-              margin: "20px 0"
-            }}
-          >
-            <div
-              style={{
-                flex: 1,
-                height: "1px",
-                background: "#ddd"
-              }}
-            />
-
-            <span>ou</span>
-
-            <div
-              style={{
-                flex: 1,
-                height: "1px",
-                background: "#ddd"
-              }}
-            />
+            <div className="login-card-symbol">
+              SP
+            </div>
           </div>
 
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "center",
-              marginBottom: "20px"
-            }}
-          >
+          <form onSubmit={entrar}>
+
+            <label className="login-field">
+              <span>E-mail</span>
+
+              <div className="login-input-wrapper">
+                <span className="login-input-icon">
+                  ✉
+                </span>
+
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="Digite seu e-mail"
+                  autoComplete="email"
+                  disabled={carregando}
+                />
+              </div>
+            </label>
+
+            <label className="login-field">
+              <span>Senha</span>
+
+              <div className="login-input-wrapper">
+                <span className="login-input-icon">
+                  🔒
+                </span>
+
+                <input
+                  type={
+                    mostrarSenha
+                      ? "text"
+                      : "password"
+                  }
+                  value={senha}
+                  onChange={(e) =>
+                    setSenha(e.target.value)
+                  }
+                  placeholder="Digite sua senha"
+                  autoComplete="current-password"
+                  disabled={carregando}
+                />
+
+                <button
+                  type="button"
+                  className="login-show-password"
+                  onClick={() =>
+                    setMostrarSenha(!mostrarSenha)
+                  }
+                  tabIndex="-1"
+                >
+                  {mostrarSenha ? "Ocultar" : "Mostrar"}
+                </button>
+              </div>
+            </label>
+
+            <button
+              type="submit"
+              className="login-submit"
+              disabled={carregando}
+            >
+              {carregando ? (
+                <>
+                  <span className="login-spinner"></span>
+                  Entrando...
+                </>
+              ) : (
+                <>
+                  Entrar
+                  <span>→</span>
+                </>
+              )}
+            </button>
+
+          </form>
+
+          <div className="login-divider">
+            <span></span>
+            <strong>ou</strong>
+            <span></span>
+          </div>
+
+          <div className="login-google">
             <GoogleLogin
               onSuccess={(credentialResponse) => {
                 if (credentialResponse.credential) {
@@ -206,33 +280,52 @@ function Login() {
                     credentialResponse.credential
                   );
                 } else {
+                  setTipoMensagem("erro");
                   setMensagem(
                     "O Google não retornou o credential."
                   );
                 }
               }}
               onError={() => {
+                setTipoMensagem("erro");
                 setMensagem(
                   "Não foi possível fazer login com Google."
                 );
               }}
+              useOneTap={false}
             />
           </div>
 
           {mensagem && (
-            <p className="form-message">
-              {mensagem}
-            </p>
+            <div
+              className={`login-message ${tipoMensagem}`}
+            >
+              <span>
+                {tipoMensagem === "sucesso"
+                  ? "✓"
+                  : "!"}
+              </span>
+
+              <p>{mensagem}</p>
+            </div>
           )}
 
-          <p>
-            Ainda não possui cadastro?{" "}
+          <div className="login-footer">
+            <span>
+              Ainda não possui cadastro?
+            </span>
+
             <Link to="/cadastro">
               Criar cadastro
             </Link>
-          </p>
-        </form>
+          </div>
+
+        </section>
       </main>
+
+      <footer className="login-page-footer">
+        © 2026 Senac Plaza Hotel · Sistema de Gestão
+      </footer>
     </div>
   );
 }
